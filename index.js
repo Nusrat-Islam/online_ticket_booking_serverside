@@ -17,11 +17,6 @@ const port = 3000
 
 
 
-//middleware
-
-// plane-db:b3OoGvXbcgd8qeWA
-
-
 //JWT Token
 app.use(
   cors({
@@ -64,8 +59,6 @@ const client = new MongoClient(uri, {
 });
 async function run() {
   try {
-
-
     const db = client.db('plane-db')
     const ticketsCollection = db.collection('flights')
     const bookingsCollection = db.collection('bookings')
@@ -93,14 +86,43 @@ const verifyVENDOR = async (req,res,next) => {
   next()
 }
 
+//
+const verifyVendorNotFraud = async (req, res, next) => {
+  const email = req.tokenEmail;
+  const user = await usersCollection.findOne({ email });
+  if (!user) {
+    return res.status(401).send({ message: "User not found" });
+  }
+  if (user.role !== "vendor") {
+    return res.status(403).send({ message: "Vendor only action" });
+  }
+  if (user.isFraud) {
+    return res.status(403).send({ message: "You are marked as fraud" });
+  }
+
+  next();
+};
+
 
     //Save Ticket data in db
-    app.post('/flights', async (req, res) => {
-      const ticketsData = req.body
-      console.log(ticketsData)
-      const result = await ticketsCollection.insertOne(ticketsData)
-      res.send(result)
-    })
+ app.post(
+  '/flights',
+  verifyJWT,
+  verifyVendorNotFraud,
+  async (req, res) => {
+    const ticketsData = {
+      ...req.body,
+      vendorEmail: req.tokenEmail,
+      createdAt: new Date(),
+  
+    };
+
+    const result = await ticketsCollection.insertOne(ticketsData);
+    res.send(result);
+  }
+);
+
+
 
     //get all flights from mongodb
     app.get('/flights', async (req, res) => {
@@ -175,6 +197,7 @@ const verifyVENDOR = async (req,res,next) => {
       const tickets = await ticketsCollection.find({ vendorEmail: email }).toArray();
       res.json(tickets);
     });
+
     app.patch('/flights/:id', async (req, res) => {
       const id = req.params.id;
 
@@ -202,38 +225,23 @@ const verifyVENDOR = async (req,res,next) => {
     });
 
     // Update verification status (approve/reject) by admin
-    // PATCH /flights/verify/:id
-    // const { ObjectId } = require("mongodb");
 
     // update verification route
     app.patch('/flights/verify/:id', async (req, res) => {
-      const { id } = req.params;
+  const { id } = req.params;
+  const { verificationStatus } = req.body; // 'approved' বা 'rejected'
 
-      if (!ObjectId.isValid(id)) {
-        return res.status(400).json({ message: "Invalid ID" });
-      }
-      const { verificationStatus } = req.body;
+  const result = await ticketsCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: { verificationStatus } }
+  );
 
-      if (!ObjectId.isValid(id)) {
-        return res.status(400).json({ message: "Invalid ticket ID" });
-      }
+  res.json(result);
+});
 
-      try {
-        const result = await ticketsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { verificationStatus } }
-        );
-        res.json(result);
-      } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: "Server error", err });
-      }
-    });
-
-    
 
     // GET /flights/all-approved
-    app.get('/flights/all-approved', async (req, res) => {
+    app.get('/flights/all/approved', async (req, res) => {
       try {
         const tickets = await ticketsCollection.find({ verificationStatus: "approved" }).toArray();
         console.log("Approved tickets:", tickets);
@@ -287,6 +295,7 @@ app.get('/users',verifyJWT,async(req,res)=> {
   const result = await usersCollection.find({ email: {$ne: adminEmail}}).toArray()
   res.send(result)
 })
+
 //update user role
 app.patch('/users/role/:id', verifyJWT, async (req, res) => {
   const { role } = req.body; // 'admin' or 'vendor'
@@ -306,11 +315,7 @@ app.patch('/users/role/:id', verifyJWT, async (req, res) => {
 //make fraud
 app.patch('/users/fraud/:id', verifyJWT, async (req, res) => {
   const userId = req.params.id;
-
   const adminUser = await usersCollection.findOne({ email: req.tokenEmail });
-  // if (!adminUser || adminUser.role !== 'admin')
-  //   return res.status(403).send({ message: 'Forbidden' });
-
   const vendor = await usersCollection.findOne({ _id: new ObjectId(userId) });
   
 
@@ -344,8 +349,6 @@ app.patch("/users/unfraud/:id", verifyJWT, async (req, res) => {
 
 
     //Payment Chekout
-
-
     app.post('/create-checkout-session', async (req, res) => {
       const paymentInfo = req.body
 
@@ -389,7 +392,7 @@ app.patch("/users/unfraud/:id", verifyJWT, async (req, res) => {
       const ticket = await bookingsCollection.findOne({
         _id: new ObjectId(session.metadata.bookingsId)
       })
-      console.log(ticket)
+    
 
       const bookings = await paymentCollection.findOne({ transactionId: session.payment_intent, })
       if (session.status === 'complete' && ticket && !bookings) {
@@ -407,11 +410,9 @@ app.patch("/users/unfraud/:id", verifyJWT, async (req, res) => {
         }
         const result = await paymentCollection.insertOne(orderInfo)
         await bookingsCollection.updateOne(
-          {
-            _id: new ObjectId(session.metadata.bookingsId),
-          },
-          { $set: { quantity: 0 } }
-        )
+      { _id: new ObjectId(session.metadata.bookingsId) },
+      { $set: { status: "paid", quantity: 0 } }
+    );
     
 
              await ticketsCollection.updateOne(
@@ -448,8 +449,8 @@ app.patch("/users/unfraud/:id", verifyJWT, async (req, res) => {
   verifyJWT,
   verifyADMIN,
   async (req, res) => {
-    const result = await bookingsCollection
-      .find({ status: "accepted" })
+    const result = await ticketsCollection
+      .find({ verificationStatus: "approved" })
       .toArray();
 
     res.send(result);
@@ -464,8 +465,8 @@ app.patch(
     const { advertise } = req.body; // true / false
 
     // count currently advertised tickets
-    const advertisedCount = await bookingsCollection.countDocuments({
-      isAdvertised: true
+    const advertisedCount = await ticketsCollection.countDocuments({
+      isAdvertised: true,
     });
 
     if (advertise && advertisedCount >= 6) {
@@ -474,7 +475,7 @@ app.patch(
       });
     }
 
-    const result = await bookingsCollection.updateOne(
+    const result = await ticketsCollection.updateOne(
       { _id: new ObjectId(id) },
       { $set: { isAdvertised: advertise } }
     );
@@ -482,9 +483,10 @@ app.patch(
     res.send(result);
   }
 );
+
 app.get('/advertised-tickets', async (req, res) => {
-  const result = await bookingsCollection
-    .find({ isAdvertised: true, status: "accepted" })
+  const result = await ticketsCollection
+    .find({ isAdvertised: true, verificationStatus: "approved" })
     .limit(6)
     .toArray();
 
@@ -507,8 +509,37 @@ app.get('/latest-tickets', async (req, res) => {
   }
 });
 
+// Vendor Revenue Overview
+app.get('/vendor/revenue-overview/:email', async (req, res) => {
+  try {
+    const vendorEmail = req.params.email;
 
-    await client.db("admin").command({ ping: 1 });
+    const ticketsAdded = await ticketsCollection.countDocuments({ vendorEmail });
+
+    const bookings = await bookingsCollection.find({ vendorEmail, status: "paid" }).toArray();
+
+    const totalTicketsSold = bookings.reduce((acc, b) => acc + (b.totalPrice/b.unitPrice || 0), 0);
+    const totalRevenue = bookings.reduce((acc, b) => acc + (b.totalPrice || 0), 0);
+console.log( totalRevenue,
+      totalTicketsSold,
+      ticketsAdded)
+    res.json({
+      totalRevenue,
+      totalTicketsSold,
+      ticketsAdded
+    });
+    
+
+  } catch (error) {
+    console.error("Revenue Overview Error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+
+
+    // await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
 
