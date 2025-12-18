@@ -14,19 +14,27 @@ admin.initializeApp({
 });
 const app = express()
 const port = 3000
+app.use(express.json())
 
 
+const allowedOrigins = [
+  "https://online-ticket-booking-ed0a4.web.app",
+  "http://localhost:5173"
+];
+app.use(cors(
+  
+));
 
 //JWT Token
-app.use(
-  cors({
-    origin: [process.env.SITE_DOMAIN
-    ],
-    credentials: true,
-    optionSuccessStatus: 200,
-  })
-)
-app.use(express.json());
+// app.use(
+//   cors({
+//     origin: [process.env.SITE_DOMAIN
+//     ],
+//     credentials: true,
+//     optionSuccessStatus: 200,
+//   })
+// )
+// app.use(express.json());
 
 // jwt middlewares
 const verifyJWT = async (req, res, next) => {
@@ -255,7 +263,7 @@ const verifyVendorNotFraud = async (req, res, next) => {
     //Save or update a user iin db
     app.post('/users',async (req, res) => {
       const userData = req.body
-
+  console.log(userData)
       //new or old user checked
       userData.created_at = new Date().toISOString()
       userData.last_loggedIn = new Date().toISOString()
@@ -281,10 +289,10 @@ const verifyVendorNotFraud = async (req, res, next) => {
     })
 
      //get  user role
-    app.get('/users/role', verifyJWT,async(req, res) => {
-  console.log(req.tokenEmail)
-  
-  const result = await usersCollection.findOne({ email: req.tokenEmail });
+    app.get('/users/role',async(req, res) => {
+  // console.log(req.tokenEmail)
+
+  const result = await usersCollection.findOne({ email: req.query.email });
   
   res.send({ role: result?.role });
 });
@@ -540,7 +548,7 @@ console.log( totalRevenue,
 
 
     // await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    // console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
 
   }
